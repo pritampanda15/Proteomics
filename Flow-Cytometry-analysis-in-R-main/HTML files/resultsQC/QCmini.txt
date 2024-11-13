@@ -1,0 +1,10 @@
+Name file	n. of events	% anomalies	analysis from	% anomalies flow Rate	% anomalies Signal	% anomalies Margins
+Specimen_001_BRUTTO_MS_016_RZ_HC_del_17-10-22	2143038	87.25	Flow Rate, Flow Signal and Flow Margin	24	82.99	22.83
+Specimen_001_IF_HC_MS_09_MS_del_07-12-22	1140174	84.76	Flow Rate, Flow Signal and Flow Margin	44.31	58.69	27.82
+Specimen_001_IF_MS_015_BR_HC_del_30-03-22	1665569	54.41	Flow Rate, Flow Signal and Flow Margin	9.97	22.55	39.83
+Specimen_001_IF_MS_05_AB_HC_del_25-03-22	764319	69.42	Flow Rate, Flow Signal and Flow Margin	33.3	31.05	49.95
+Specimen_001_MS_01_NF_HC_del_18-10-21	764441	91.12	Flow Rate, Flow Signal and Flow Margin	21.67	40.41	83.38
+Specimen_001_BRUTTO_MS_016_RZ_HC_del_17-10-22	2143038	87.25	Flow Rate, Flow Signal and Flow Margin	24	82.99	22.83
+Specimen_001_IF_HC_MS_09_MS_del_07-12-22	1140174	84.76	Flow Rate, Flow Signal and Flow Margin	44.31	58.69	27.82
+Specimen_001_BRUTTO_MS_016_RZ_HC_del_17-10-22	2143038	87.25	Flow Rate, Flow Signal and Flow Margin	24	82.99	22.83
+Specimen_001_IF_HC_MS_09_MS_del_07-12-22	1140174	84.76	Flow Rate, Flow Signal and Flow Margin	44.31	58.69	27.82

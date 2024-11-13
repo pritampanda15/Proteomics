@@ -1,0 +1,501 @@
+---
+title: "Flow Cytometry Data Analysis in R"
+author: "Pritam Kumar Panda"
+institution: "German Cancer Research Center DKFZ"
+country: "Germany"
+format:
+  html:
+    code-fold: false
+    code-link: true
+    code-tools: true
+editor: visual
+execute:
+    cache: true
+---
+
+## 
+
+# High-throughput FACS analyses with R
+
+Evaluating flow cytometry data using R might appear intimidating initially, but I strongly encourage its adoption for individuals conducting medium to high-throughput FACS-based experiments. Even when examining a limited number of markers, conventional flow analysis software such as FlowJo struggles when dealing with extensive sample datasets. It operates slowly, is susceptible to crashes, and exporting large plots can be cumbersome. In contrast, R-based flow cytometry analysis excels in addressing these challenges effectively. Various R packages are available for the analysis of flow cytometry data, offering versatile solutions for researchers.
+
+![](images/flow_cytometry.png)
+
+The packages I am using in this tutorial and which I highly recommend are:
+
+1.  flowCore
+2.  flowStats
+3.  flowAI
+4.  cytoML
+5.  openCyto
+6.  flowWorkspace
+7.  ggcyto
+
+Other helpful links for parameters: <https://fcsexpressdownloads.s3.amazonaws.com/manual/manual_WIN_RUO/index.html?welcome_to_fcs_express_version.htm>
+
+**CytoRSuite** is designed to provide an interactive interface for the analysis of flow cytometry data in R. If you are new to **CytoRSuite** visit <https://dillonhammill.github.io/CytoRSuite/> to get started.
+
+```{r echo=TRUE, results='hide'}
+#| label: base packages
+install.packages("tidyverse")
+install.packages("knitr")
+install.packages("ggplot2")
+install.packages("remotes")
+install.packages("BiocManager")
+install.packages("devtools")
+install.packages("kableExtra")
+```
+
+```{r echo=TRUE, results='hide'}
+#| label: Install bioconductor packages
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("flowCore")
+BiocManager::install("flowWorkspace")
+BiocManager::install("openCyto")
+BiocManager::install("flowAI")
+BiocManager::install("ggcyto")
+BiocManager::install("CytoML")
+
+#optional package to explore further
+# CytoExploreR 
+devtools::install_github("DillonHammill/CytoExploreR")
+devtools::install_github("DillonHammill/CytoExploreRData")
+```
+
+```{r}
+#| label: load-packages
+#| echo: true
+library(flowCore)
+library(CytoML)
+library(flowAI)
+library(flowWorkspace)
+library(ggcyto)
+library(tidyverse)
+library(CytoExploreR)
+library(openCyto)
+library(CytoExploreRData)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+```
+
+```{r}
+#| label: increase memory and use cache of larger files
+knitr::opts_chunk$set(cache = TRUE, warning = FALSE, 
+                      message = FALSE, cache.lazy = FALSE)
+```
+
+## Format .fcs data
+
+Before running the analyses, do this to rename all your files using this bash script to add "\_" if the file name has spaces.
+
+```{bash}
+#| label: format your files
+cd facs_data
+for file in Specimen_*.fcs; do
+    mv "$file" "$(echo $file | tr ' ' '_')"
+done
+
+```
+
+If you want to load only one sample and get to know the details you can do so by using read.FCS function.
+
+```{r echo=TRUE, results='hide'}
+#| label: read single file
+## Read one single dataset
+myfile <- "./facs_data/Specimen_001_BRUTTO_MS_016_RZ_HC_del_17-10-22.fcs"
+fcsfile<- read.FCS(myfile, truncate_max_range = FALSE)
+names(fcsfile)#names of the columns
+exprs(fcsfile) #expression values
+each_col(fcsfile, median) #median
+keyword(fcsfile) #metadata
+```
+
+## Read the whole dataset
+
+The `read.flowSet` allows you to read many `.fcs` at once. The resultant flowSet object will store the data from all these `.fcs` files.
+
+```{r}
+#| label: read the whole dataset 
+#check the coloumn names
+fs <- read.flowSet(path = "./facs_data//", pattern = ".fcs", truncate_max_range = FALSE, alter.names = T)
+fs[1]
+fs
+colnames(fs[1])
+```
+
+#Sample information such as sample names can be accessed with the pData function. So, let's extract the well ID from the sample name.
+
+```{r}
+#| label: extract metadata
+pData(fs)[1:5,]
+# Pattern to extract the date, accounting for potential extra text after the date
+pData(fs)$well <- gsub(".*del_(\\d{1,2}-\\d{1,2}-\\d{2,4}).*?\\.fcs", "\\1", sampleNames(fs))
+pData(fs)[1:5,]
+### Understand the abbrebiations/dyes/chemicals used. This is optional
+colnames(fs)
+#check parameters data
+fs[[1]]@parameters@data
+```
+
+#### Abbreviations used
+
+The abbreviations are commonly used in flow cytometry. Here's a brief explanation of some of the key terms:
+
+1.  **FSC**: Forward Scatter
+
+    -   **FSC.A**: Forward Scatter Area
+    -   **FSC.H**: Forward Scatter Height
+
+    Forward scatter is related to the size of the cell. The larger the cell, the more light is scattered in the forward direction.
+
+2.  **SSC**: Side Scatter
+
+    -   **SSC.A**: Side Scatter Area
+    -   **SSC.H**: Side Scatter Height
+
+    Side scatter reflects the complexity or granularity of the cell. For example, cells with internal structures, like granules, will scatter more light to the side.
+
+3.  **FITC**: Fluorescein Isothiocyanate
+
+    -   This is a fluorescent dye used to label cells or components within cells. It's not explicitly listed in your abbreviations, but it's a common fluorochrome in flow cytometry.
+
+4.  The other abbreviations (like "BB515.A", "BB630.A", "BUV395.A", etc.) are likely referring to specific fluorescent markers or dyes used in the analysis. Each of these markers is designed to bind to a specific cell component or molecule and will emit light at a specific wavelength when excited by a laser. The ".A" typically stands for Area, indicating the measurement of the fluorescent signal's area.
+
+5.  **APC**: Allophycocyanin
+
+    -   **APC.A**: Allophycocyanin Area
+    -   **APC.R700.A**: APC R700 Area
+    -   **APC.H7.A**: APC H7 Area
+
+    APC is another fluorescent dye used in flow cytometry.
+
+6.  **PE**: Phycoerythrin
+
+    -   **PE.CF594.A**: Phycoerythrin CF594 Area
+    -   **PE.Cy5.A**: Phycoerythrin Cy5 Area
+    -   **PE.Cy7.A**: Phycoerythrin Cy7 Area
+    -   **PE.A**: Phycoerythrin Area
+
+    PE is a bright fluorescent dye commonly used in flow cytometry.
+
+7.  **BV**: Brilliant Violet
+
+    -   The numbers following "BV" (like in "BV421.A", "BV510.A", etc.) refer to different variants of the Brilliant Violet dye, each with a specific emission spectrum.
+
+8.  **Time**: This usually refers to the time parameter, indicating the duration of the cell's passage through the laser beam, which can be useful for identifying doublets or aggregates.
+
+Each of these parameters provides different information about the cells being analyzed, allowing for detailed characterization of cell populations based on size, granularity, and the presence of specific markers or dyes.
+
+```{r}
+#| label: renaming some markers
+#| ### If you want to change your column names(optional)
+colnames(fs)
+fs[[1]]@parameters@data
+#If you want to change certain namings then use this. Just an example. You can change accordingly for your observations/experiment
+#colnames(fs)[colnames(fs) == "BB660.P.A"] <- "BB660.P"
+#colnames(fs)[colnames(fs) == "BB755.P.A"] <- "BB755.P"
+#colnames(fs)[colnames(fs) == "BB790.P.A"] <- "BB790.P"
+
+#If you want to change certain namings then use this
+#colnames(fs)[colnames(fs)=="FSC.A"] <- "FSC"
+#colnames(fs)[colnames(fs)=="PE.CF594.A"] <- "Phycoerythrin"
+```
+
+## Compensate your sample manually
+
+The **Spillover Spreading Matrix** (SSM) values have been demonstrated to reveal fluorescence spectrum interactions that can limit the sensitivity of a reagent in the presence of brightly-stained cells on a different color. The SSM can thus be a useful tool in instrument quality control to ensure consistent sensitivity and performance. In addition, the SSM is a key element for predicting multicolor immunofluorescence panels, which will aid in the optimization and development of new panels.
+
+TheSpillover Spreading Matrix page is automatically created by FCS Express when either the Compensation or the Unmixing Matrix is calculated and depicts a spreadsheet with the Spillover Spreading values for every pair of dyes included in the compensation/unmixing matrix respectively.
+
+Compensating flow cytometry data is an essential step in the analysis of multicolor panels. It corrects for the overlap of fluorescent signals between different channels. The output you provided looks like it's from an FCS file, showing various parameters like forward scatter (FSC), side scatter (SSC), and different fluorochromes associated with specific markers (e.g., CD24, IgD, CD56).
+
+To properly compensate your FCS files, you typically need the following:
+
+1.  **Unstained Control:** A sample that has cells (or beads) without any fluorescent labels. This control helps you set the baseline for autofluorescence.
+
+2.  **Single-Color Controls:** These are samples where each cell (or bead) is stained with only one fluorochrome at a time. These controls are crucial for compensation as they show the extent of spectral overlap into other channels.
+
+3.  **Compensation Software or Tools:** Most flow cytometry software comes with built-in compensation tools. These tools use the single-color controls to calculate compensation matrices, which are then applied to your experimental data.
+
+4.  **Experimental Data:** Your actual samples that have been stained with multiple fluorochromes.
+
+```{r echo=TRUE, results='hide'}
+#| label: compensation using control sample
+#compensate using 1st sample assuming you know the control
+spillover(fs[[1]])
+fs_comp <-compensate(fs, spillover(fs[[1]])$SPILL)
+fs_comp[[1]]@parameters@data
+```
+
+## Quality check
+
+It will create a folder with quality control html files.
+
+1.  **Flow Rate Check (33.3% of anomalous cells detected):**
+
+    -   This check assesses whether cells are passing through the flow cytometer at an appropriate rate. An optimal flow rate is crucial for accurate data collection.
+
+    -   Anomalies here could be due to issues like clumping of cells, clogging in the flow cell, or incorrect flow rate settings, leading to inconsistent cell counts or data.
+
+    -   A high percentage of anomalous cells in this check suggests that a significant portion of the sample may have been analyzed under suboptimal flow conditions.
+
+2.  **Signal Acquisition Check (31.05% of anomalous cells detected):**
+
+    -   This pertains to the detection and measurement of the fluorescence and scatter signals from the cells.
+
+    -   Anomalies in signal acquisition can arise from issues like inadequate staining, photobleaching, detector malfunction, or electronic noise.
+
+    -   A substantial proportion of cells with anomalous signal acquisition can lead to inaccurate fluorescence intensity measurements, affecting the interpretation of the data.
+
+3.  **Dynamic Range Check (49.95% of anomalous cells detected):**
+
+    -   The dynamic range check evaluates whether the fluorescence intensities of the cells fall within the detectable range of the cytometer.
+
+    -   Cells outside this range can either be too dim (below detection limit) or too bright (causing signal saturation), both of which can skew data interpretation.
+
+    -   A high percentage in this category could mean that a large portion of your cells are either too dim or too bright for accurate measurement, possibly due to over- or under-staining, or issues with the cytometer settings.
+
+```{r}
+#| label: Quality Check of samples
+#QC
+#flow_auto_qc(fs_comp)
+```
+
+## Transformation
+
+Transforming flow cytometry data after compensation is a common and important step in the analysis process. Compensation corrects for spectral overlap between different fluorochromes, but it doesn't address the issue of data distribution. Flow cytometry data, especially fluorescence intensity, often exhibits a positively skewed distribution. Transformations like log or biexponential (logicle) are used to convert this skewed data into a more normally distributed form, which is easier to analyze and interpret.
+
+```{r}
+#| label: transformation
+#Transformation
+fs_comp[[1]]@parameters@data
+trans <- estimateLogicle(fs_comp[[1]], colnames(fs_comp[[1]][,5:32]))
+fs_comp_clean_trans <- transform(fs_comp, trans)
+fs_comp_clean_trans[[1]]
+fs_comp_clean_trans[[1]]@parameters@data
+```
+
+## Visulaize the results using ggcyto
+
+```{r}
+#| label: compare the plots
+autoplot(fs_comp[[1]])
+autoplot(fs_comp_clean_trans[[1]])
+autoplot(fs_comp_clean_trans, x="FSC.A", y="SSC.A", bins = 256)+facet_wrap(~ well)
+
+#visualization with other marker
+autoplot(fs_comp_clean_trans, x="FSC.A", y="PE.CF594.A", bins = 256)+ facet_wrap(~ well)
+#visualization with time
+autoplot(fs_comp_clean_trans, x="Time", y="FSC.A", bins = 256)+facet_wrap(~ well)
+
+```
+
+## GatingSet
+
+### **What is Gating in Flow Cytometry?**
+
+1.  **Cell Population Identification**: Gating is used to identify and isolate specific subpopulations of cells from a heterogeneous mixture. Flow cytometry can analyze thousands to millions of cells in a single run, and these cells can vary in size, granularity, and fluorescence. Gating allows researchers to focus on specific cells of interest based on these characteristics.
+
+2.  **Noise Reduction**: It helps in eliminating debris, dead cells, and aggregates, which are not relevant to the analysis. This cleaning up of data is crucial for accurate results.
+
+3.  **Analysis Simplification**: By isolating specific cell populations, gating simplifies the analysis. It's easier to study and interpret the characteristics of a homogenous population than a heterogeneous one.
+
+4.  **Quantitative Analysis**: Gating enables quantitative analysis of cell populations. Researchers can determine the percentage of cells expressing a particular marker, the intensity of expression, and other quantitative metrics.
+
+5.  **Sequential Gating**: Often, gating is a multi-step process where one gate is applied to isolate a broad population, and subsequent gates are used to progressively narrow down to more specific cell types.
+
+### **Why Transform `flowSet` to `GatingSet`?**
+
+In R, the transformation of a **`flowSet`** object to a **`GatingSet`** object is a critical step for gating:
+
+1.  **Structure Adaptation**: **`flowSet`** is a collection of flow cytometry samples (FCS files). To apply gating, this data needs to be in a format that can be interacted with gating tools. **`GatingSet`** provides this structure.
+
+2.  **Gating Tools Compatibility**: **`GatingSet`** is compatible with various gating tools and functions in R. It allows for the application of both manual and automated gating strategies.
+
+3.  **Efficient Handling of Data**: **`GatingSet`** objects are designed to handle large datasets efficiently, making them suitable for high-throughput data.
+
+4.  **Integration with Visualization Tools**: Once the data is in a **`GatingSet`**, it can be easily visualized using tools like **`ggcyto`**, allowing for the visual assessment of gates and the populations they isolate.
+
+5.  **Data Integrity**: Transforming to a **`GatingSet`** ensures that the integrity of the original data is maintained while allowing for the sophisticated manipulation needed for gating.
+
+To be able to add gates, the flowSet has to be transformed to a GatingSet object with the `GatingSet` function
+
+```{r}
+gs <- GatingSet(fs_comp_clean_trans)
+```
+
+```{r}
+#| label: cell gating
+#cell gate
+fs_data<- gs_pop_get_data(gs)
+my_gate<- fsApply(fs_data, function(fr) openCyto:::.flowClust.2d(fr, channels= c("FSC.A","SSC.A")))
+gs_pop_add(gs, my_gate, parent = "root", name="my_gate")
+recompute(gs)
+```
+
+```{r}
+#| label: plot each set
+for (i in 1:length(gs)) {
+    # Generate the plot for each sample
+    p <- autoplot(gs[[i]], x="FSC.A", y="SSC.A", "my_gate", bins=256)
+    
+    # Print the plot
+    print(p)
+
+    # Optionally, you can save each plot to a file
+    # ggsave(filename=paste("plot_", i, ".png", sep=""), plot=p)
+}
+```
+
+```{r}
+#| label: setup single gate
+#cell gate
+#Singlet gate
+fs_data <- gs_pop_get_data(gs, "my_gate") #get parent data
+singlet_gate <- fsApply(fs_data, function(fr) openCyto:::.singletGate(fr, channels =c("FSC.A", "FSC.H")))
+gs_pop_add(gs, singlet_gate, parent = "my_gate", name = "singlets")
+recompute(gs)
+autoplot(gs, x = 'FSC.A', y = 'FSC.H', "singlets", bins = 256)
+
+```
+
+```{r}
+#| label: plot each set of single gate
+for (i in 1:length(gs)) {
+    # Generate the plot for each sample
+    p <- autoplot(gs[[i]], x="FSC.A", y="FSC.H", "singlets", bins=256)
+    
+    # Print the plot
+    print(p)
+
+    # Optionally, you can save each plot to a file
+    # ggsave(filename=paste("plot_", i, ".png", sep=""), plot=p)
+}
+```
+
+Quad gate (optional)
+
+```{r}
+#Quad gate (optional)
+#fs_comp_clean_trans[[1]]@parameters@data
+#fs_data <- gs_pop_get_data(gs, "singlets") #get parent data
+#BGquad_gate <- fsApply(fs_data, function(fr) openCyto:::.quadGate.seq(fr, gFunc="mindensity", min=c(3,3), channels =c('BUV737.A', 'BUV805.A')))
+#gs_pop_add(gs, BGquad_gate, parent = "singlets", names = c("1", "2", "3", "4"))
+#recompute(gs)
+#gs_get_pop_paths(gs[[1]])
+#plot(gs)
+#autoplot(gs, x = 'BUV737.A', y = 'BUV805.A', gs_get_pop_paths(auto_gs)[5:32], bins = 256)
+
+#fix plot
+#p<-ggcyto(auto_gs[1:2],aes(x = 'X.BUV737.A', y = 'BUV805.A'), subset="singlets", arrange = FALSE)
+#p<- p + geom_hex(bins=256)
+#p<- p + geom_gate(gs_get_pop_paths(auto_gs)[5:32]) 
+#p<- p + geom_stats(gs_get_pop_paths(auto_gs)[5:32])
+#p<- p + theme(strip.text = element_text(size = 7))
+#myPars <- ggcyto_par_set(limits = list(y = c(3,5), x = c(3,5)))
+#p<- p  + myPars
+#p
+```
+
+## Statistics
+
+### **`gs_pop_get_stats(gs)`**
+
+-   **Purpose**: This command retrieves basic statistical information for all cell populations in the **`GatingSet`**.
+
+-   **Importance**: It provides an overview of the cell populations identified by gating, including counts and percentages, which are fundamental for understanding the composition of your sample.
+
+### **2. `gs_pop_get_stats(gs, "my_gate", "percent")`**
+
+-   **Purpose**: This retrieves the percentage of cells in a specific gate (**`"my_gate"`**) relative to the parent population.
+
+-   **Importance**: Understanding the proportion of a specific cell population (e.g., a particular type of immune cell) is crucial in many biological and medical contexts, such as determining the prevalence of a cell type in a disease state.
+
+### **3. `gs_pop_get_stats(gs, "my_gate", type = pop.MFI)`**
+
+-   **Purpose**: Retrieves the Mean Fluorescence Intensity (MFI) for the population in **`"my_gate"`**.
+
+-   **Importance**: MFI is a measure of the average fluorescence intensity of a cell population, indicating the level of expression of a fluorescent marker. This is particularly important in assessing the expression levels of proteins of interest, like receptors or antigens on cell surfaces.
+
+### **4. `gs_pop_get_stats(gs, gs_get_pop_paths(gs), type = pop.quantiles)`**
+
+-   **Custom Function**: **`pop.quantiles`** calculates the 75th percentile (or any other specified quantile) for each channel.
+
+-   **Purpose**: This command applies the custom **`pop.quantiles`** function to each gated population.
+
+-   **Importance**: Quantiles provide insights into the distribution of fluorescence intensities, which can be critical for understanding variability within cell populations and for identifying subpopulations with higher or lower marker expression.
+
+### **5. `gs_pop_get_stats(gs, gs_get_pop_paths(gs), type = pop.mean)`**
+
+-   **Custom Function**: **`pop.mean`** calculates the mean of each channel.
+
+-   **Purpose**: Applies the custom **`pop.mean`** function to each gated population.
+
+-   **Importance**: The mean is a basic statistical measure that provides an average value for fluorescence intensity or other parameters across a cell population. This is useful for comparing the overall expression levels of markers across different samples or conditions.
+
+```{r}
+#| label: statistics
+#statistics
+gs_pop_get_stats(gs)
+gs_pop_get_stats(gs, "my_gate", "percent")
+gs_pop_get_stats(gs, "my_gate", type = pop.MFI)
+
+pop.quantiles <- function(fr){
+  chnls <- colnames(fr)
+  res <- matrixStats::colQuantiles(exprs(fr), probs = 0.75)
+  names(res) <- chnls
+  res
+}
+gs_pop_get_stats(gs, gs_get_pop_paths(gs), type = pop.quantiles)
+
+pop.mean <- function(fr){
+  chnls <- colnames(fr)
+  res <- colMeans(exprs(fr))
+  names(res) <- chnls
+  res
+}
+gs_pop_get_stats(gs, gs_get_pop_paths(gs), type = pop.mean)
+```
+
+## Get populations stats for downstream analysis
+
+To get the data from each gating step from the `GatingSet`, we can use the `gs_pop_get_count_with_meta`function (which conveniently also retrieves all the metadata and sample names you might have added).
+
+Stats:
+
+-   **Count:** This is the number of events (e.g., cells or particles) that fall within a specific gate in a flow cytometry experiment. In the context of flow cytometry, "events" typically mean individual cells that have been detected and recorded by the cytometer.
+
+-   **ParentCount:** This refers to the number of events in the parent population from which a subset (child gate) was derived. In gating hierarchies, you often start with a broad population (like all detected events) and apply gates to sequentially narrow down to specific populations of interest. The "ParentCount" is the count of the broader population before the more specific gate was applied.
+
+-   **percent_of_parent:** This is a calculated field that represents the proportion of events in a specific gate relative to the parent population. It's calculated by dividing the "Count" by the "ParentCount" and typically expressed as a percentage. This gives you an idea of how many cells from the original parent population fall into a more specific category defined by your gating strategy.
+
+```{r}
+#| label: Get populations stats for downstream analysis
+ps <- gs_pop_get_count_with_meta(gs)
+ps <- ps %>% mutate(percent_of_parent=Count/ParentCount)
+
+styled_table <- ps %>%
+  select(sampleName, well, Population, Count, ParentCount, percent_of_parent) %>%
+  head() %>%
+  mutate(across(everything(), ~cell_spec(.x, background = "black", color = "white"))) %>%
+  kable("html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = F)
+
+# This will print the table in your R Markdown document
+styled_table
+
+```
+
+## Save the whole analysis in Rdata file
+
+```{r}
+#| label: save the data
+#save.image(file = "facs_data_with_plots_stats.Rdata")
+```
+
+```{r}
+#renv::snapshot()
+```
